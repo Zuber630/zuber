@@ -1,0 +1,57 @@
+pipeline {
+  agent any
+
+  environment {
+    ECR_REPOSITORY = 'baseimage'
+    AWS_REGION = 'us-east-1'
+    AWS_ACCOUNT_ID = '756519966653'
+    DOCKER_IMAGE_NAME = 'baseimage'
+    DOCKERFILE_PATH = '/var/lib/jenkins/workspace/hg/Dockerfiles'
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        git branch: 'develop', credentialsId: 'git-id', url: 'https://github.com/eigenmaps/GenAI_development.git'
+      }
+    }
+
+    stage('Install Dependencies') {
+      steps {
+        sh 'pip install -r requirements.txt'
+      }
+    }
+
+    stage('Build') {
+      steps {
+        sh 'python build.py'
+      }
+    }
+
+    stage('Run Tests') {
+      steps {
+        sh 'pytest'
+      }
+    }
+
+    stage('Build Docker Image') {
+      steps {
+        script {
+          def dockerImage = docker.build("${env.DOCKER_IMAGE_NAME}:${env.BUILD_NUMBER}", "${env.DOCKERFILE_PATH}")
+          docker.withRegistry("https://${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com", 'ecr') {
+            dockerImage.push("${env.ECR_REPOSITORY}:${env.BUILD_NUMBER}")
+          }
+        }
+      }
+    }
+
+    stage('Deploy to Kubernetes') {
+      steps {
+        script {
+          kubernetesDeploy(configs: "deployment.yml", kubeconfigId: "kubernetes")
+          kubernetesDeploy(configs: "service.yml", kubeconfigId: "kubernetes")
+        }
+      }
+    }
+  }
+}
