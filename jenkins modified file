@@ -1,0 +1,53 @@
+pipeline {
+  agent any
+
+  environment {
+    ECR_REPOSITORY = 'emobservbility'
+    AWS_REGION = 'ap-south-1'
+    AWS_ACCOUNT_ID = '996386420142'
+    DOCKER_IMAGE_NAME = 'baseimage'
+    DOCKERFILE_PATH = '/var/lib/jenkins/workspace/job3/Dockerfiles'
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        git branch: 'develop', credentialsId: 'git-id', url: 'https://github.com/eigenmaps/GenAI_development.git'
+      }
+    }
+
+    stage('Get Docker Credentials') {
+      steps {
+        sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+      }
+    }
+
+    stage('Pull Image from ECR') {
+      steps {
+        sh "docker pull ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:baseimage"
+      }
+    }
+
+    stage('Build Docker Image') {
+      steps {
+        sh "docker build -t ${DOCKER_IMAGE_NAME}:${env.BUILD_NUMBER} ${DOCKERFILE_PATH}"
+      }
+    }
+
+    stage('Tag and Push Image to ECR') {
+      steps {
+        sh "docker tag ${DOCKER_IMAGE_NAME}:${env.BUILD_NUMBER} ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${DOCKER_IMAGE_NAME}-${env.BUILD_NUMBER}"
+        sh "docker push ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${DOCKER_IMAGE_NAME}-${env.BUILD_NUMBER}"
+      }
+    }
+
+    stage('Deploy to Kubernetes') {
+      steps {
+        script {
+          kubernetesDeploy(configs: "aicpu.yaml", kubeconfigId: "kube-config")
+          kubernetesDeploy(configs: "servicecpu.yaml", kubeconfigId: "kube-config")
+        }
+      }
+    }
+  }
+}
