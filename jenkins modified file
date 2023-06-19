@@ -41,6 +41,13 @@ pipeline {
       }
     }
 
+    stage('Update YAML with Build Number') {
+      steps {
+        // Update the aicpu.yaml file with the build number
+        sh "sed -i 's/{{BUILD_NUMBER}}/${env.BUILD_NUMBER}/g' aicpu.yaml"
+      }
+    }
+
     stage('Deploy to Kubernetes') {
       steps {
         script {
