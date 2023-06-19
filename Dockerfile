@@ -1,2 +1,2 @@
 FROM ubuntu
-COPY .. /home/ec2-user
+COPY . /home/ec2-user
