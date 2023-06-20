@@ -1,0 +1,64 @@
+pipeline {
+    agent any
+
+    environment {
+        ECR_REPOSITORY = 'emobservbility'
+        AWS_REGION = 'ap-south-1'
+        AWS_ACCOUNT_ID = '996386420142'
+        DOCKER_IMAGE_NAME = 'genai'
+        DOCKERFILE_PATH = 'Dockerfiles'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'develop', credentialsId: 'git-id', url: 'https://github.com/eigenmaps/GenAI_development.git'
+            }
+        }
+
+        stage('Get Docker Credentials') {
+            steps {
+                sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+            }
+        }
+
+        stage('Pull Image from ECR') {
+            steps {
+                sh "docker pull ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:baseimg"
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh "docker build -t ${DOCKER_IMAGE_NAME}:${env.BUILD_NUMBER} ${DOCKERFILE_PATH}"
+            }
+        }
+
+        stage('Tag and Push Image to ECR') {
+            steps {
+                sh "docker tag ${DOCKER_IMAGE_NAME}:${env.BUILD_NUMBER} ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${DOCKER_IMAGE_NAME}-${env.BUILD_NUMBER}"
+                sh "docker push ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${DOCKER_IMAGE_NAME}-${env.BUILD_NUMBER}"
+            }
+        }
+
+        stage('Update YAML with Build Number') {
+            steps {
+                // Update the aicpu.yaml file with the build number
+                sh "sed -i 's/{{BUILD_NUMBER}}/${env.BUILD_NUMBER}/g' aicpu.yaml"
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                sshagent(['aa5201c9-9ec2-4f6e-91dd-25bbccb48cd4']) {
+                    sh """
+                        rsync -e 'ssh -o StrictHostKeyChecking=no -i /var/lib/jenkins/workspace/job2/aicpu.yaml' /var/lib/jenkins/workspace/job2/aicpu.yaml ubuntu@43.205.142.149:/home/ubuntu
+                        rsync -e 'ssh -o StrictHostKeyChecking=no -i /var/lib/jenkins/workspace/job2/aicpu.yaml' /var/lib/jenkins/workspace/job2/servicecpu.yaml ubuntu@43.205.142.149:/home/ubuntu
+                        ssh ubuntu@43.205.142.149 /home/ubuntu/bin/kubectl apply -f /home/ubuntu/aicpu.yaml
+                        ssh ubuntu@43.205.142.149 /home/ubuntu/bin/kubectl apply -f /home/ubuntu/servicecpu.yaml
+                    """
+                }
+            }
+        }
+    }
+}
